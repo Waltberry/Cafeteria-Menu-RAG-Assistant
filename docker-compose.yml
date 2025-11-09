@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-menu_rag}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-menu_rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      target: app
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/menu_rag}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: bash -lc "python scripts/wait_for_db.py && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  ui:
+    build:
+      context: .
+      target: app
+    env_file:
+      - .env
+    depends_on:
+      - api
+    command: bash -lc "streamlit run ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0"
+    ports:
+      - "8501:8501"
+
+  ingest:
+    build:
+      context: .
+      target: app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: bash -lc "python scripts/wait_for_db.py && python scripts/ingest.py"
+
+volumes:
+  pgdata:

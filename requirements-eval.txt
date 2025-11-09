@@ -1,0 +1,4 @@
+ragas==0.1.9
+openai==1.50.2
+langchain==0.2.16
+datasets==3.0.1
