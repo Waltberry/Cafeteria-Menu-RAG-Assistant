@@ -1,189 +1,139 @@
 # Cafeteria Menu RAG Assistant
 
-**Repo name:** `cdai-menu-rag`  
-Ask questions about cafeteria menus, allergens, and nutrition using Retrieval-Augmented Generation (RAG).  
-This project ingests sample menu & nutrition documents, chunks + embeds them, and stores vectors in **Postgres + pgvector**.  
-We provide a **FastAPI** backend for retrieval and a **Streamlit** chat UI. Optional LLM generation and **ragas** evaluation are included.
-
-> **Data** in `data/raw` is **synthetic** and for demo only. Drop in your own PDFs/Markdown and re-run ingestion.
-
----
+**Repo:** `cdai-menu-rag`
+Ask questions about cafeteria menus, allergens, and nutrition using Retrieval-Augmented Generation (RAG).
+Ingest sample docs → chunk → embed (Sentence-Transformers **or** OpenAI) → store in **Postgres + pgvector** → query via **FastAPI** → chat in **Streamlit** with citations.
+Data in `data/raw` is **synthetic** for demo—replace with your own PDFs/Markdown and re-ingest.
 
 ## Architecture
 
 ```
-+--------------------+        +-------------------+
-|  Raw docs (PDF/MD) | ---->  |  Ingest & Chunk   |  (Python)
-+--------------------+        +-------------------+
-                                      |
-                                      v
-                            +--------------------+
-                            |  Embeddings        |  (Sentence-Transformers
-                            |  (MiniLM or OpenAI)|   or OpenAI embeddings)
-                            +--------------------+
-                                      |
-                                      v
-                          +------------------------+
-                          | Postgres + pgvector    |
-                          |  documents( content,   |
-                          |  source, page, chunk,  |
-                          |  embedding VECTOR(n) ) |
-                          +------------------------+
-                                      ^
-                                      |
-                          +------------------------+
-                          |  FastAPI /query        |
-                          |  vector search +       |
-                          |  (optional LLM gen)    |
-                          +------------------------+
-                                      |
-                                      v
-                          +------------------------+
-                          | Streamlit Chat UI      |
-                          | citations + snippets   |
-                          +------------------------+
+Raw docs (PDF/MD/TXT)
+        │
+        ▼
+Ingest & Chunk  ──► Embeddings (MiniLM or OpenAI)
+        │                          │
+        └──────────────► Postgres + pgvector (VECTOR(n), ivfflat)
+                                   ▲
+                                   │
+                         FastAPI (/health, /query)
+                                   │
+                                   ▼
+                           Streamlit UI (citations)
 ```
 
----
+## TL;DR (Docker)
 
-## Quickstart (VS Code - Local Python)
+```bash
+cp .env.example .env                  # set USE_OPENAI=0 or 1; add OPENAI_API_KEY if 1
+docker compose up -d db               # start Postgres with pgvector
+docker compose run --rm ingest        # one-time: index the docs in data/raw/**
+docker compose up -d api ui           # API on :8000, UI on :8501
+```
 
-**Prereqs**
-- Python 3.11
-- Postgres with `pgvector` extension (or use Docker below)
-- (Optional) OpenAI API key for LLM/embeddings
+* API health: `http://localhost:8000/health`
+* UI: `http://localhost:8501`
 
-**1) Clone & env**
+**Test the API quickly (PowerShell):**
+
+```powershell
+$body = @{ question = "What vegetarian options are there on Tuesday?"; top_k = 5 } | ConvertTo-Json
+Invoke-RestMethod -Uri http://localhost:8000/query -Method POST -ContentType 'application/json' -Body $body
+```
+
+## Local Dev (VS Code / Python)
+
+**Prereqs:** Python 3.11, Postgres with `CREATE EXTENSION vector;` (or just use Docker DB)
+
 ```bash
 git clone <your-repo-url> cdai-menu-rag
 cd cdai-menu-rag
-cp .env.example .env   # edit if needed
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+cp .env.example .env    # configure as needed
+python -m venv .venv && source .venv/bin/activate   # Windows: .\.venv\Scripts\activate
 pip install -r requirements.txt
-```
 
-**2) Start Postgres with pgvector**
-- Easiest: `docker compose up -d db`  
-- Or use your local Postgres and ensure `CREATE EXTENSION vector;`
+# Start DB (easiest with Docker)
+docker compose up -d db
 
-**3) Ingest data**
-```bash
+# Ingest
 python scripts/ingest.py
-```
-This scans `data/raw/**` for `.pdf`, `.md`, `.txt`, chunks & embeds, and inserts into Postgres.
 
-**4) Run API**
-```bash
+# Run API
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-Health check at `http://localhost:8000/health`
 
-**5) Run UI**
-```bash
+# Run UI
 streamlit run ui/streamlit_app.py
 ```
-Open the UI at `http://localhost:8501` and ask questions like:
-- “What are gluten-free options on Tuesday?”  
-- “Calories in the quinoa bowl?”  
-- “Which items contain dairy?”
 
----
+## Switch Embeddings (Local vs OpenAI)
 
-## Docker (API + UI + DB)
+In `.env`:
 
-```bash
-cp .env.example .env
-docker compose up --build -d db
-docker compose run --rm ingest         # one-time to ingest documents
-docker compose up --build api ui       # starts API (8000) and UI (8501)
+```
+# Local (default)
+USE_OPENAI=0
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2   # 384 dims
+
+# OpenAI
+USE_OPENAI=1
+OPENAI_API_KEY=sk-...    # rotate if you ever exposed it
+EMBEDDING_MODEL=text-embedding-3-small                   # 1536 dims (or -3-large for 3072)
 ```
 
-- API: `http://localhost:8000`
-- UI: `http://localhost:8501`
+**Important:** The table dimension is created from the first run. If you change models (384 → 1536/3072), drop/recreate the table and re-ingest:
 
-Re-run `docker compose run --rm ingest` after adding new docs to `data/raw`.
-
----
-
-## Config
-
-`.env` (see `.env.example`):
-- `DATABASE_URL` (default: `postgresql+psycopg://postgres:postgres@db:5432/menu_rag` in Docker)
-- `EMBEDDING_MODEL` (default: `sentence-transformers/all-MiniLM-L6-v2`)
-- `USE_OPENAI=1` and `OPENAI_API_KEY=...` to switch to OpenAI embeddings (`text-embedding-3-small`, dim=1536)
-- `TOP_K` retrieval count
-- `API_URL` for the Streamlit UI
-
-**Note:** Table dimension is created from the first embedding run. If you change models (dim), clear the table:
 ```sql
-TRUNCATE TABLE documents;
--- or drop and re-run ingestion if dims differ
-DROP TABLE documents;
+DROP INDEX IF EXISTS documents_embedding_idx;
+DROP TABLE IF EXISTS documents;
+DELETE FROM metadata;
 ```
-then re-run `scripts/ingest.py`.
 
----
+Then:
 
-## Evaluation (optional, requires LLM)
-
-We use **ragas** for retrieval/answer quality. Install extras:
 ```bash
-pip install -r requirements-eval.txt
-export OPENAI_API_KEY=...
+docker compose run --rm ingest
+docker compose exec db psql -U postgres -d menu_rag -c "ANALYZE documents;"
 ```
 
-Then run:
-```bash
-python scripts/eval_ragas.py
+## What’s in here
+
+```
+api/main.py              # FastAPI: /health, /query (returns answer + citations)
+app/embeddings.py        # Chooses MiniLM or OpenAI based on USE_OPENAI
+app/db.py                # pgvector helpers (create table, insert, similarity search)
+scripts/ingest.py        # scan data/raw/**, chunk, embed, insert (batch-safe)
+scripts/chunker.py       # simple text chunker with overlap
+scripts/wait_for_db.py   # container helper
+ui/streamlit_app.py      # simple chat UI with citations + settings
+data/raw/                # synthetic demo docs
+Dockerfile
+docker-compose.yml
 ```
 
-- You can edit `scripts/eval_ragas.py` to define a small QA dataset (few-shot) based on your own menus.
-- Metrics (typical): `context_precision`, `context_recall`, `faithfulness`, `answer_relevancy`
+## Troubleshooting
+
+* **UI shows no answer / empty citations**
+  Ensure you ingested:
+  `docker compose exec db psql -U postgres -d menu_rag -c "SELECT count(*) FROM documents;"`
+  If `0`, re-run ingestion. After first load or model switch, run:
+  `docker compose exec db psql -U postgres -d menu_rag -c "ANALYZE documents;"`
+
+* **“Method Not Allowed” on `/query`**
+  `/query` is **POST**. Send JSON body with `question` and optional `top_k`.
+
+* **Switched to OpenAI and got weird results**
+  You likely didn’t drop the old 384-dim table. Drop + re-ingest (see above).
+
+* **Windows PowerShell curl confusion**
+  Prefer `Invoke-RestMethod` (example in TL;DR) or run `curl.exe` with `-H` and `-d` from Git Bash/Wsl.
+
+## Evaluation (optional)
+
+We include a `ragas` script stub (`scripts/eval_ragas.py`) to compute retrieval/answer quality.
+Install extras (`requirements-eval.txt`), set `OPENAI_API_KEY`, then run the script and tailor the small QA set.
+
+## License
+
+MIT
 
 ---
-
-## Project Structure
-
-```
-cdai-menu-rag/
-├── api/
-│   └── main.py            # FastAPI app (/health, /query)
-├── app/
-│   ├── core/config.py     # env/config
-│   ├── db.py              # Postgres + pgvector helpers
-│   └── embeddings.py      # Embedding client (MiniLM or OpenAI)
-├── scripts/
-│   ├── chunker.py         # simple chunker (sections + overlap)
-│   ├── ingest.py          # ingestion pipeline
-│   ├── wait_for_db.py     # docker helper
-│   └── eval_ragas.py      # OPTIONAL: ragas evaluation
-├── ui/
-│   └── streamlit_app.py   # chat UI (calls API)
-├── data/
-│   ├── raw/               # synthetic sample docs (add yours here)
-│   └── processed/         # reserved for future use
-├── .env.example
-├── requirements.txt
-├── requirements-eval.txt
-├── Dockerfile
-├── docker-compose.yml
-├── LICENSE
-└── README.md
-```
-
----
-
-## Notes & Tips
-
-- The API returns citations (file path, page, chunk) so the UI can show “grounded” sources.
-- Retrieval uses cosine distance with `ivfflat` index. For larger corpora, consider HNSW or tuning `lists`.
-- To switch to OpenAI for embeddings and generation, set `USE_OPENAI=1` and provide `OPENAI_API_KEY`. The UI demonstrates an extractive fallback if no LLM is available.
-
----
-
-## Roadmap
-
-- Add LLM answer synthesis with grounding checks (TruLens/RAGAS judge).
-- Add ingestion CLI to tag sources (location, date range) and filter at query time.
-- Support S3/GCS ingestion and scheduled re-index.
-- Add unit tests and basic e2e smoke test.
