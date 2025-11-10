@@ -3,7 +3,7 @@ import os, requests, streamlit as st
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="Cafeteria Menu RAG Assistant", layout="wide")
-st.title("🥗 Cafeteria Menu RAG Assistant")
+st.title("🥗 Cafeteria Menu")
 
 if "history" not in st.session_state:
     st.session_state.history = []

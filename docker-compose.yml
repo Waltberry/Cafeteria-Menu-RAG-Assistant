@@ -1,8 +1,7 @@
-version: "3.9"
-
 services:
   db:
     image: pgvector/pgvector:pg16
+    container_name: menu_rag_db
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-menu_rag}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -21,39 +20,60 @@ services:
     build:
       context: .
       target: app
-    env_file:
-      - .env
+    container_name: menu_rag_api
+    env_file: [.env]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/menu_rag}
+      # Use plain psycopg DSN (your code normalizes, but this avoids confusion)
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/menu_rag}
+      PYTHONPATH: /app
     depends_on:
       db:
         condition: service_healthy
+    working_dir: /app
     command: bash -lc "python scripts/wait_for_db.py && uvicorn api.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
+    # Dev live-reload: mount code into the container
+    volumes:
+      - ./:/app
 
   ui:
     build:
       context: .
       target: app
-    env_file:
-      - .env
+    container_name: menu_rag_ui
+    env_file: [.env]
     depends_on:
       - api
+    environment:
+      PYTHONPATH: /app
+      # Ensure UI talks to the API service by default
+      API_URL: ${API_URL:-http://api:8000}
+    working_dir: /app
     command: bash -lc "streamlit run ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0"
     ports:
       - "8501:8501"
+    volumes:
+      - ./:/app
 
   ingest:
     build:
       context: .
       target: app
-    env_file:
-      - .env
+    container_name: menu_rag_ingest
+    env_file: [.env]
     depends_on:
       db:
         condition: service_healthy
-    command: bash -lc "python scripts/wait_for_db.py && python scripts/ingest.py"
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/menu_rag}
+      PYTHONFAULTHANDLER: "1"
+    working_dir: /app
+    # Mount only the data folder (read-only) so ingest always sees your latest files
+    volumes:
+      - ./:/app
+    command: bash -lc "python scripts/wait_for_db.py && python -m scripts.ingest"
 
 volumes:
   pgdata:

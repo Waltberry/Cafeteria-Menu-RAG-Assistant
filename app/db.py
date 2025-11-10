@@ -3,8 +3,17 @@ import psycopg
 from psycopg.rows import dict_row
 from app.core.config import DATABASE_URL
 
+
+def _normalize_dsn(dsn: str) -> str:
+    # accept SQLAlchemy-style scheme by converting it
+    if dsn.startswith("postgresql+psycopg://"):
+        dsn = dsn.replace("postgresql+psycopg://", "postgresql://", 1)
+    return dsn
+
+
 def get_conn():
-    return psycopg.connect(DATABASE_URL, autocommit=True)
+    return psycopg.connect(_normalize_dsn(DATABASE_URL), autocommit=True)
+
 
 def create_extension_and_table(embedding_dim: int):
     with get_conn() as conn:
