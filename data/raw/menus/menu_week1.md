@@ -1,4 +1,4 @@
-# Compass Cafeteria — Weekly Menu (Downtown Location)
+# Compass Cafeteria — Weekly Menu (Downtown Location) data/raw/menus/menu_week1.md
 
 ## Monday
 - Breakfast: Veggie Omelette (eggs, bell pepper, mushrooms), Oatmeal with berries

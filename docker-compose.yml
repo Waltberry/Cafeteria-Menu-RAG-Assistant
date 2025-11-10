@@ -70,9 +70,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/menu_rag}
       PYTHONFAULTHANDLER: "1"
     working_dir: /app
-    # Mount only the data folder (read-only) so ingest always sees your latest files
     volumes:
       - ./:/app
+      - ./data:/app/data:ro
     command: bash -lc "python scripts/wait_for_db.py && python -m scripts.ingest"
 
 volumes:

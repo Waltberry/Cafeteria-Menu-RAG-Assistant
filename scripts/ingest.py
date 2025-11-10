@@ -8,6 +8,7 @@ from pypdf import PdfReader
 
 RAW_DIR = os.path.join("data", "raw")
 
+
 def read_pdf(path: str) -> List[str]:
     reader = PdfReader(path)
     pages = []
@@ -18,9 +19,11 @@ def read_pdf(path: str) -> List[str]:
             pages.append("")
     return pages
 
+
 def read_text(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
 
 def collect_sources() -> List[Tuple[str, int, str]]:
     out = []
@@ -34,49 +37,51 @@ def collect_sources() -> List[Tuple[str, int, str]]:
                 out.append((fp, -1, read_text(fp)))
     return out
 
+
 def main():
     emb = EmbeddingClient()
     dim = emb.get_dimension()
     print(f"Using embedding model: {emb.name()} (dim={dim})", flush=True)
 
+    # Prepare DB fresh each run
     create_extension_and_table(dim)
     clear_documents()
 
     sources = collect_sources()
     print(f"Found {len(sources)} source items under {RAW_DIR}", flush=True)
 
-    rows = []
+    total_rows = 0
     for (src, page, text) in sources:
         rel = os.path.relpath(src, start="data")
+        label = f"{rel}{(f':p{page}' if page != -1 else '')}"
         try:
             if not text or not text.strip():
-                print(f" !! Skipping empty: {rel}{(f':p{page}' if page != -1 else '')}", flush=True)
+                print(f" !! Skipping empty: {label}", flush=True)
                 continue
-            chunks = smart_chunk(text, max_chars=800, overlap=120)
+
+            # small-ish chunks for reliability
+            chunks = smart_chunk(text, max_chars=600, overlap=80)
             if not chunks:
-                print(f" !! No chunks: {rel}{(f':p{page}' if page != -1 else '')}", flush=True)
+                print(f" !! No chunks: {label}", flush=True)
                 continue
-            embs = emb.embed(chunks)
-            for idx, (chunk, vec) in enumerate(zip(chunks, embs)):
+
+            # embed one-by-one to avoid spikes
+            rows = []
+            for idx, chunk in enumerate(chunks):
+                vec = emb.embed_one(chunk)
                 rows.append((src, page, idx, chunk, vec))
-            print(f" -> {rel}{(f':p{page}' if page != -1 else '')} | chunks: {len(chunks)}", flush=True)
+
+            # insert just this file's rows
+            insert_document_rows(rows)
+            total_rows += len(rows)
+            print(f" -> Inserted {len(rows)} rows for {label}", flush=True)
+
         except Exception as e:
-            # Never let one file crash the whole run
-            print(f" !! Error on {rel}{(f':p{page}' if page != -1 else '')}: {type(e).__name__}: {e}", flush=True)
+            # Don't let one bad file kill the whole run
+            print(f" !! Error on {label}: {type(e).__name__}: {e}", flush=True)
 
-    print(f"Total chunks to insert: {len(rows)}", flush=True)
+    print(f"Done. Total rows inserted: {total_rows}", flush=True)
 
-    if not rows:
-        print("Nothing to insert. Exiting.", flush=True)
-        return
-
-    BATCH = 500
-    for i in range(0, len(rows), BATCH):
-        batch = rows[i:i+BATCH]
-        insert_document_rows(batch)
-        print(f"Inserted {min(i+BATCH, len(rows))}/{len(rows)}", flush=True)
-
-    print("Ingestion complete.", flush=True)
 
 if __name__ == "__main__":
     main()
