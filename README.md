@@ -1,6 +1,5 @@
 # Cafeteria Menu RAG Assistant
 
-**Repo:** `cdai-menu-rag`
 Ask questions about cafeteria menus, allergens, and nutrition using Retrieval-Augmented Generation (RAG).
 Ingest sample docs → chunk → embed (Sentence-Transformers **or** OpenAI) → store in **Postgres + pgvector** → query via **FastAPI** → chat in **Streamlit** with citations.
 Data in `data/raw` is **synthetic** for demo—replace with your own PDFs/Markdown and re-ingest.
